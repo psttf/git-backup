@@ -8,9 +8,12 @@ import scala.sys.process._
 object Main {
 
   val parser = new scopt.OptionParser[ParsedOptions]("git-backup") {
-    opt[String]     ('r', "root")  .action( (x, c) => c.copy(root = Some(x)) )
-    opt[Seq[String]]('b', "bases") .action( (x, c) => c.copy(bases = x) )
-    opt[String]     ('t', "target").action( (x, c) => c.copy(target = Some(x)) )
+    opt[String]     ('r', "root").required()
+      .action( (x, c) => c.copy(root = Some(x)) )
+    opt[Seq[String]]('b', "bases")
+      .action( (x, c) => c.copy(bases = x) )
+    opt[String]     ('t', "target").required()
+      .action( (x, c) => c.copy(target = Some(x)) )
   }
 
   private def dirs(file: File) = {
