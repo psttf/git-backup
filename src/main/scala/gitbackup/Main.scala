@@ -2,12 +2,11 @@ package gitbackup
 
 import java.io.File
 
-import scala.sys.process.ProcessBuilder.Source
 import scala.sys.process._
 
 object Main {
 
-  val parser = new scopt.OptionParser[ParsedOptions]("git-backup") {
+  private lazy val parser = new scopt.OptionParser[ParsedOptions]("git-backup") {
     opt[String]     ('r', "root").required()
       .action( (x, c) => c.copy(root = Some(x)) )
     opt[Seq[String]]('b', "bases")
@@ -21,10 +20,43 @@ object Main {
     file.listFiles.toList.filter(f => f.isDirectory)
   }
 
-  def repoDirs(file: File): List[File] = {
+  private def repoDirs(file: File): List[File] = {
     val subDirs = dirs(file)
     if (subDirs exists (_.getName == ".git")) List(file)
     else subDirs.flatMap(repoDirs)
+  }
+
+  private def getRelativePath(file: File, folder: File): String = {
+    val filePath = file.getAbsolutePath
+    val folderPath = folder.getAbsolutePath
+    if (filePath.startsWith(folderPath))
+      filePath.substring(folderPath.length + 1)
+    else
+      sys.error(s"$file is not a in $folder")
+  }
+
+  private def zip(
+    zipFile: File, contentFiles: Iterable[File], base: File
+  ) = {
+
+    import java.io.{BufferedInputStream, FileInputStream, FileOutputStream}
+    import java.util.zip.{ZipEntry, ZipOutputStream}
+
+    val zip = new ZipOutputStream(new FileOutputStream(zipFile))
+
+    contentFiles.foreach { contentFile =>
+      zip.putNextEntry(new ZipEntry(getRelativePath(contentFile, base)))
+      val in = new BufferedInputStream(new FileInputStream(contentFile))
+      var b = in.read()
+      while (b > -1) {
+        zip.write(b)
+        b = in.read()
+      }
+      in.close()
+      zip.closeEntry()
+    }
+    zip.close()
+
   }
 
   def main(args: Array[String]): Unit =
@@ -44,23 +76,20 @@ object Main {
             "git diff", dir
           ).#>(new File(repoTarget, s"${dir.getName}-diff")).run
           val s = "git ls-files -o --exclude-standard"
-          val unversioned = new File(repoTarget, s"${dir.getName}-unversioned")
-          if (unversioned.exists()) unversioned.delete()
+          val unversionedZip =
+            new File(repoTarget, s"${dir.getName}-unversioned.zip")
+          if (unversionedZip.exists()) unversionedZip.delete()
           val quoted = """"(.*)"""".r
-          Process(s, dir).lineStream.toList flatMap ( name =>
-            List[Source](
-              s"cmd /c echo ----",
-              s"cmd /c echo $name",
-              s"cmd /c echo ----",
-              new File(
-                dir,
-                name match {
-                  case quoted(path) => path
-                  case other        => other
-                }
-              )
+          val unversionedFiles = Process(s, dir).lineStream.toList map ( name =>
+            new File(
+              dir,
+              name match {
+                case quoted(path) => path
+                case other        => other
+              }
             )
-          ) map (_.#>>(unversioned).!)
+          )
+          zip(unversionedZip, unversionedFiles, dir)
         }
       case None => println("exiting")
     }
